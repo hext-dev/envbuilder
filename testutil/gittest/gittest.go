@@ -251,15 +251,20 @@ func Commit(t *testing.T, path, content, msg string) CommitFunc {
 	}
 }
 
-// NewRepo returns a new Git repository.
+// NewRepo returns a new Git repository with "main" as the default branch.
 func NewRepo(t *testing.T, fs billy.Filesystem, commits ...CommitFunc) *git.Repository {
+	return NewRepoWithBranch(t, fs, "main", commits...)
+}
+
+// NewRepoWithBranch returns a new Git repository with a custom default branch.
+func NewRepoWithBranch(t *testing.T, fs billy.Filesystem, defaultBranch string, commits ...CommitFunc) *git.Repository {
 	t.Helper()
 	storage := filesystem.NewStorage(fs, cache.NewObjectLRU(cache.DefaultMaxSize))
 	repo, err := git.Init(storage, fs)
 	require.NoError(t, err)
 
-	// This changes the default ref to main instead of master.
-	h := plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.ReferenceName("refs/heads/main"))
+	// Set the default branch to the specified name.
+	h := plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.ReferenceName("refs/heads/"+defaultBranch))
 	err = storage.SetReference(h)
 	require.NoError(t, err)
 

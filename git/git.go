@@ -94,7 +94,10 @@ func CloneRepo(ctx context.Context, logf func(string, ...any), opts CloneRepoOpt
 	}
 	reference := parsed.Fragment
 	if reference == "" && opts.SingleBranch {
-		reference = "refs/heads/main"
+		// When SingleBranch is true and no branch is specified, don't set a
+		// default. go-git will automatically detect and use the remote's HEAD
+		// (default branch) via the "+HEAD:refs/remotes/origin/HEAD" refspec.
+		logf("No branch specified, using remote's default branch")
 	}
 	parsed.RawFragment = ""
 	parsed.Fragment = ""
