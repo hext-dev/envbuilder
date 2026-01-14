@@ -168,6 +168,39 @@ func TestCloneRepo(t *testing.T) {
 	}
 }
 
+func TestCloneRepo_NonMainDefaultBranch(t *testing.T) {
+	t.Parallel()
+
+	// Test that cloning works when the remote's default branch is not "main".
+	// This verifies that we detect the remote's HEAD instead of hardcoding "main".
+	for _, defaultBranch := range []string{"master", "develop", "trunk"} {
+		defaultBranch := defaultBranch
+		t.Run(defaultBranch, func(t *testing.T) {
+			t.Parallel()
+			srvFS := memfs.New()
+			_ = gittest.NewRepoWithBranch(t, srvFS, defaultBranch,
+				gittest.Commit(t, "README.md", "Hello from "+defaultBranch, "Initial commit"),
+			)
+			srv := httptest.NewServer(gittest.NewServer(srvFS))
+			t.Cleanup(srv.Close)
+
+			clientFS := memfs.New()
+			cloned, err := git.CloneRepo(context.Background(), t.Logf, git.CloneRepoOptions{
+				Path:         "/workspace",
+				RepoURL:      srv.URL,
+				Storage:      clientFS,
+				SingleBranch: true, // This triggers the default branch detection
+			})
+			require.NoError(t, err)
+			require.True(t, cloned)
+
+			// Verify the file was cloned correctly
+			readme := mustRead(t, clientFS, "/workspace/README.md")
+			require.Equal(t, "Hello from "+defaultBranch, readme)
+		})
+	}
+}
+
 func TestShallowCloneRepo(t *testing.T) {
 	t.Parallel()
 
