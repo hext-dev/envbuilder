@@ -59,7 +59,7 @@ jobs:
       - name: Build and Push
         env:
           VERSION: "${{ steps.get-version.outputs.ENVBUILDER_VERSION }}"
-          BASE: "ghcr.io/coder/envbuilder"
+          BASE: "ghcr.io/hext-dev/envbuilder"
         run: |
           ./scripts/build.sh \
             --arch=amd64 \

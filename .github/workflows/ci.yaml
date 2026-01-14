@@ -111,7 +111,7 @@ jobs:
       - name: Build and Push
         if: github.ref == 'refs/heads/main'
         run: |
-          BASE=ghcr.io/coder/envbuilder-preview
+          BASE=ghcr.io/hext-dev/envbuilder-preview
 
           ./scripts/build.sh \
             --arch=amd64 \
