@@ -18,6 +18,7 @@ import (
 	"github.com/coder/retry"
 	"github.com/google/uuid"
 	"golang.org/x/mod/semver"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var (
@@ -84,9 +85,10 @@ func Coder(ctx context.Context, coderURL *url.URL, token string) (logger Func, c
 
 // CoderClient wraps the connection to Coder and provides lifecycle reporting.
 type CoderClient struct {
-	client *agentsdk.Client
-	logger Func
-	closer func()
+	client    *agentsdk.Client
+	rpcClient proto.DRPCAgentClient20
+	logger    Func
+	closer    func()
 }
 
 // Logger returns the log function for sending logs to Coder.
@@ -101,12 +103,44 @@ func (c *CoderClient) Close() {
 	}
 }
 
-// ReportLifecycle reports a lifecycle state change to Coder.
+// ReportLifecycle reports a lifecycle state change to Coder via the dRPC API.
 func (c *CoderClient) ReportLifecycle(ctx context.Context, state codersdk.WorkspaceAgentLifecycle) error {
-	return c.client.PostLifecycle(ctx, agentsdk.PostLifecycleRequest{
-		State:     state,
-		ChangedAt: time.Now(),
+	if c.rpcClient == nil {
+		return fmt.Errorf("no RPC client available for lifecycle reporting")
+	}
+
+	// Map codersdk lifecycle state to proto lifecycle state
+	var protoState proto.Lifecycle_State
+	switch state {
+	case codersdk.WorkspaceAgentLifecycleCreated:
+		protoState = proto.Lifecycle_CREATED
+	case codersdk.WorkspaceAgentLifecycleStarting:
+		protoState = proto.Lifecycle_STARTING
+	case codersdk.WorkspaceAgentLifecycleStartTimeout:
+		protoState = proto.Lifecycle_START_TIMEOUT
+	case codersdk.WorkspaceAgentLifecycleStartError:
+		protoState = proto.Lifecycle_START_ERROR
+	case codersdk.WorkspaceAgentLifecycleReady:
+		protoState = proto.Lifecycle_READY
+	case codersdk.WorkspaceAgentLifecycleShuttingDown:
+		protoState = proto.Lifecycle_SHUTTING_DOWN
+	case codersdk.WorkspaceAgentLifecycleShutdownTimeout:
+		protoState = proto.Lifecycle_SHUTDOWN_TIMEOUT
+	case codersdk.WorkspaceAgentLifecycleShutdownError:
+		protoState = proto.Lifecycle_SHUTDOWN_ERROR
+	case codersdk.WorkspaceAgentLifecycleOff:
+		protoState = proto.Lifecycle_OFF
+	default:
+		return fmt.Errorf("unknown lifecycle state: %s", state)
+	}
+
+	_, err := c.rpcClient.UpdateLifecycle(ctx, &proto.UpdateLifecycleRequest{
+		Lifecycle: &proto.Lifecycle{
+			State:     protoState,
+			ChangedAt: timestamppb.Now(),
+		},
 	})
+	return err
 }
 
 // CoderWithGCPAuth establishes a connection to Coder using GCP instance identity
@@ -145,12 +179,14 @@ func CoderWithGCPAuth(ctx context.Context, coderURL *url.URL, serviceAccount str
 		return nil, fmt.Errorf("get coder build version: %w", err)
 	}
 
-	var logger Func
+	var logFunc Func
 	var closer func()
+	var rpcClient proto.DRPCAgentClient20
 
 	if semver.Compare(semver.MajorMinor(bi.Version), minAgentAPIV2) < 0 {
 		metaLogger.Warn(ctx, "Detected Coder version incompatible with AgentAPI v2, falling back to deprecated API", slog.F("coder_version", bi.Version))
-		logger, closer = sendLogsV1(ctx, client, metaLogger.Named("send_logs_v1"))
+		logFunc, closer = sendLogsV1(ctx, client, metaLogger.Named("send_logs_v1"))
+		// No RPC client available for lifecycle reporting in v1
 	} else {
 		// Create a new context so we can ensure the connection is torn down.
 		connCtx, cancel := context.WithCancel(ctx)
@@ -159,9 +195,12 @@ func CoderWithGCPAuth(ctx context.Context, coderURL *url.URL, serviceAccount str
 			cancel()
 			return nil, fmt.Errorf("init coder rpc client: %w", err)
 		}
+		// Store the RPC client for lifecycle reporting
+		rpcClient = dac
+
 		ls := agentsdk.NewLogSender(metaLogger.Named("coder_log_sender"))
 		metaLogger.Info(ctx, "Sending logs via AgentAPI v2", slog.F("coder_version", bi.Version))
-		logger, loggerCloser := sendLogsV2(connCtx, dac, ls, metaLogger.Named("send_logs_v2"))
+		logFunc, loggerCloser := sendLogsV2(connCtx, dac, ls, metaLogger.Named("send_logs_v2"))
 
 		var closeOnce sync.Once
 		closer = func() {
@@ -174,9 +213,10 @@ func CoderWithGCPAuth(ctx context.Context, coderURL *url.URL, serviceAccount str
 	}
 
 	return &CoderClient{
-		client: client,
-		logger: logger,
-		closer: closer,
+		client:    client,
+		rpcClient: rpcClient,
+		logger:    logFunc,
+		closer:    closer,
 	}, nil
 }
 
