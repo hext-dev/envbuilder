@@ -200,7 +200,8 @@ func CoderWithGCPAuth(ctx context.Context, coderURL *url.URL, serviceAccount str
 
 		ls := agentsdk.NewLogSender(metaLogger.Named("coder_log_sender"))
 		metaLogger.Info(ctx, "Sending logs via AgentAPI v2", slog.F("coder_version", bi.Version))
-		logFunc, loggerCloser := sendLogsV2(connCtx, dac, ls, metaLogger.Named("send_logs_v2"))
+		var loggerCloser func()
+		logFunc, loggerCloser = sendLogsV2(connCtx, dac, ls, metaLogger.Named("send_logs_v2"))
 
 		var closeOnce sync.Once
 		closer = func() {
