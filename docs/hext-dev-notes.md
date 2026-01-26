@@ -49,29 +49,7 @@ devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.0"
 1. ✅ Add new options to `options/options.go`
 2. ✅ Add GCP instance identity auth to `log/coder.go`
 3. ✅ Add lifecycle reporting on failure in `cmd/envbuilder/main.go`
-4. ⚠️ Update GitHub Actions to build `hext-dev-*` tags (requires manual edit via GitHub UI)
-
-### Manual Step Required: Update GitHub Actions
-
-The OAuth token lacks `workflow` scope, so you need to manually edit `.github/workflows/release.yaml` via the GitHub web UI:
-
-1. Go to: https://github.com/hext-dev/envbuilder/edit/hext/gcp-lifecycle-reporting/.github/workflows/release.yaml
-2. Change the `on.push.tags` section from:
-   ```yaml
-   on:
-     push:
-       tags:
-         - "v*"
-   ```
-   To:
-   ```yaml
-   on:
-     push:
-       tags:
-         - "v*"
-         - "hext-dev-v*"
-   ```
-3. Commit directly to the `hext/gcp-lifecycle-reporting` branch
+4. ✅ Update GitHub Actions to build `hext-dev-*` tags
 
 ### Testing
 
