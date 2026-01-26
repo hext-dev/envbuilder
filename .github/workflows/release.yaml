@@ -3,6 +3,7 @@ on:
   push:
     tags:
       - "v*"
+      - "hext-dev-v*"
 
 permissions:
   # Required to publish a release
