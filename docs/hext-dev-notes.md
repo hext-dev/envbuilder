@@ -78,3 +78,80 @@ git checkout hext/gcp-lifecycle-reporting
 git rebase main
 git push --force-with-lease origin hext/gcp-lifecycle-reporting
 ```
+
+## Critical Gotchas
+
+### Use Annotated Tags for Releases
+
+**CRITICAL:** The release workflow requires **annotated tags**. Lightweight tags produce wrong versions.
+
+```bash
+# WRONG - lightweight tag, produces "hext-dev-v0.1.2+dev-abc123"
+git tag hext-dev-v0.1.2
+git push origin hext-dev-v0.1.2
+
+# CORRECT - annotated tag, produces "hext-dev-v0.1.2"
+git tag -a hext-dev-v0.1.2 -m "Release hext-dev-v0.1.2: GCP lifecycle reporting"
+git push origin hext-dev-v0.1.2
+```
+
+**Why:** The `scripts/version.sh` uses `git describe --always` to verify the tag. With lightweight tags:
+- `git describe --always` returns the commit hash (e.g., `abc123`)
+- The script compares `hext-dev-v0.1.2` != `abc123`, fails the check
+- Falls back to dev versioning: `hext-dev-v0.1.2+dev-abc123`
+
+With annotated tags, `git describe --always` returns the tag name, and the comparison succeeds.
+
+### Re-pushing Tags
+
+If you need to recreate a tag (e.g., to fix lightweight → annotated):
+
+```bash
+# Delete local and remote tag
+git tag -d hext-dev-v0.1.2
+git push origin --delete hext-dev-v0.1.2
+
+# Create annotated tag and push
+git tag -a hext-dev-v0.1.2 -m "Release message"
+git push origin hext-dev-v0.1.2
+```
+
+### Verifying the Build
+
+After pushing a tag, verify the build pushed the correct image:
+
+```bash
+# Watch the build
+gh run watch <run-id> -R hext-dev/envbuilder --exit-status
+
+# Check the pushed manifest (should NOT have +dev suffix)
+gh run view <run-id> -R hext-dev/envbuilder --log | grep "pushing manifest"
+# Should show: ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.2 (no +dev)
+```
+
+### Testing the Image
+
+After build completes, test with a new workspace (increment the name each time):
+
+```bash
+coder create test-repo-N --template hext-devcontainer \
+  --parameter source=https://github.com/hext-dev/test-repo#broken-devcontainer \
+  --parameter region=us-east4-a \
+  --parameter instance_type=e2-small \
+  --parameter fallback_image=none \
+  --yes
+```
+
+Check the VM logs to verify GCP auth and lifecycle reporting:
+```bash
+gcloud compute ssh <vm-name> --zone=us-east4-a --command \
+  "sudo journalctl -u google-startup-scripts.service | grep -iE 'auth|lifecycle|error'"
+```
+
+Expected output for successful lifecycle reporting:
+```
+Authenticating to Coder using GCP instance identity
+Successfully authenticated to Coder via GCP instance identity
+Reporting start_error lifecycle state to Coder...
+Successfully reported start_error to Coder
+```
