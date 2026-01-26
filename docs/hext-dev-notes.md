@@ -14,13 +14,15 @@ This document tracks custom modifications in the hext-dev/envbuilder fork.
 - **Upstream tags:** `v1.x.x` (from coder/envbuilder)
 - **Hext dev tags:** `hext-dev-v0.x.x` (our custom features)
 
+**Current dev version:** `hext-dev-v0.1.2` (GCP instance identity auth + lifecycle reporting)
+
 This separation allows easy rollback:
 ```terraform
 # Use stable version
 devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:latest"
 
 # Use dev version with GCP lifecycle reporting
-devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.0"
+devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.2"
 ```
 
 ## Feature: GCP Instance Identity Auth + Lifecycle Reporting
@@ -55,7 +57,7 @@ devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.0"
 
 ```bash
 # Template uses new image
-devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.0"
+devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.2"
 
 # Pass new env vars
 "ENVBUILDER_CODER_AUTH_METHOD": "gcp-instance-identity",
