@@ -158,6 +158,15 @@ type Options struct {
 	// CoderAgentSubsystem is the Coder agent subsystems to report when forwarding
 	// logs. The envbuilder subsystem is always included.
 	CoderAgentSubsystem []string
+	// CoderAuthMethod specifies the authentication method for Coder.
+	// Valid values are "token" (default) and "gcp-instance-identity".
+	// When set to "gcp-instance-identity", envbuilder will authenticate using
+	// GCP instance identity instead of requiring CODER_AGENT_TOKEN.
+	CoderAuthMethod string
+	// GCPServiceAccount is the GCP service account email to use when
+	// authenticating with gcp-instance-identity. Required when CoderAuthMethod
+	// is "gcp-instance-identity".
+	GCPServiceAccount string
 
 	// PushImage is a flag to determine if the image should be pushed to the
 	// container registry. This option implies reproducible builds.
@@ -480,6 +489,22 @@ func (o *Options) CLI() serpent.OptionSet {
 			Value: serpent.StringArrayOf(&o.CoderAgentSubsystem),
 			Description: "Coder agent subsystems to report when forwarding logs. " +
 				"The envbuilder subsystem is always included.",
+		},
+		{
+			Flag:    "coder-auth-method",
+			Env:     WithEnvPrefix("CODER_AUTH_METHOD"),
+			Value:   serpent.StringOf(&o.CoderAuthMethod),
+			Default: "token",
+			Description: "Authentication method for Coder. Valid values are 'token' (default) " +
+				"and 'gcp-instance-identity'. When set to 'gcp-instance-identity', envbuilder " +
+				"will authenticate using GCP instance identity instead of requiring CODER_AGENT_TOKEN.",
+		},
+		{
+			Flag:  "gcp-service-account",
+			Env:   WithEnvPrefix("GCP_SERVICE_ACCOUNT"),
+			Value: serpent.StringOf(&o.GCPServiceAccount),
+			Description: "GCP service account email to use when authenticating with " +
+				"gcp-instance-identity. Required when ENVBUILDER_CODER_AUTH_METHOD is 'gcp-instance-identity'.",
 		},
 		{
 			Flag:  "push-image",

@@ -47,31 +47,57 @@ func envbuilderCmd() serpent.Command {
 			defer preExec() // Ensure cleanup in case of error.
 
 			o.Logger = log.New(os.Stderr, o.Verbose)
+
+			// Track Coder client for lifecycle reporting on failure
+			var coderClient *log.CoderClient
+
 			if o.CoderAgentURL != "" {
-				if o.CoderAgentToken == "" {
-					return errors.New("CODER_AGENT_URL must be set if CODER_AGENT_TOKEN is set")
-				}
 				u, err := url.Parse(o.CoderAgentURL)
 				if err != nil {
 					return fmt.Errorf("unable to parse CODER_AGENT_URL as URL: %w", err)
 				}
-				coderLog, closeLogs, err := log.Coder(inv.Context(), u, o.CoderAgentToken)
-				if err == nil {
-					o.Logger = log.Wrap(o.Logger, coderLog)
-					preExecs = append(preExecs, func() {
-						closeLogs()
-					})
-					// This adds the envbuilder subsystem.
-					// If telemetry is enabled in a Coder deployment,
-					// this will be reported and help us understand
-					// envbuilder usage.
-					if !slices.Contains(o.CoderAgentSubsystem, string(codersdk.AgentSubsystemEnvbuilder)) {
-						o.CoderAgentSubsystem = append(o.CoderAgentSubsystem, string(codersdk.AgentSubsystemEnvbuilder))
-						_ = os.Setenv("CODER_AGENT_SUBSYSTEM", strings.Join(o.CoderAgentSubsystem, ","))
+
+				// Determine auth method
+				switch o.CoderAuthMethod {
+				case "gcp-instance-identity":
+					// Use GCP instance identity authentication
+					if o.GCPServiceAccount == "" {
+						return errors.New("ENVBUILDER_GCP_SERVICE_ACCOUNT is required when using gcp-instance-identity auth")
 					}
-				} else {
-					// Failure to log to Coder should cause a fatal error.
-					o.Logger(log.LevelError, "unable to send logs to Coder: %s", err.Error())
+					client, err := log.CoderWithGCPAuth(inv.Context(), u, o.GCPServiceAccount)
+					if err != nil {
+						o.Logger(log.LevelError, "unable to authenticate to Coder via GCP instance identity: %s", err.Error())
+					} else {
+						coderClient = client
+						o.Logger = log.Wrap(o.Logger, client.Logger())
+						preExecs = append(preExecs, func() {
+							client.Close()
+						})
+					}
+
+				case "token", "":
+					// Use token-based authentication (default)
+					if o.CoderAgentToken == "" {
+						return errors.New("CODER_AGENT_TOKEN is required when CODER_AGENT_URL is set (or use ENVBUILDER_CODER_AUTH_METHOD=gcp-instance-identity)")
+					}
+					coderLog, closeLogs, err := log.Coder(inv.Context(), u, o.CoderAgentToken)
+					if err == nil {
+						o.Logger = log.Wrap(o.Logger, coderLog)
+						preExecs = append(preExecs, func() {
+							closeLogs()
+						})
+					} else {
+						o.Logger(log.LevelError, "unable to send logs to Coder: %s", err.Error())
+					}
+
+				default:
+					return fmt.Errorf("invalid ENVBUILDER_CODER_AUTH_METHOD: %q (valid values: token, gcp-instance-identity)", o.CoderAuthMethod)
+				}
+
+				// Add envbuilder subsystem for telemetry
+				if !slices.Contains(o.CoderAgentSubsystem, string(codersdk.AgentSubsystemEnvbuilder)) {
+					o.CoderAgentSubsystem = append(o.CoderAgentSubsystem, string(codersdk.AgentSubsystemEnvbuilder))
+					_ = os.Setenv("CODER_AGENT_SUBSYSTEM", strings.Join(o.CoderAgentSubsystem, ","))
 				}
 			}
 
@@ -96,6 +122,16 @@ func envbuilderCmd() serpent.Command {
 			err := envbuilder.Run(inv.Context(), o, preExec)
 			if err != nil {
 				o.Logger(log.LevelError, "error: %s", err)
+
+				// Report start_error lifecycle state to Coder if we have a client
+				if coderClient != nil {
+					o.Logger(log.LevelInfo, "Reporting start_error lifecycle state to Coder...")
+					if lifecycleErr := coderClient.ReportLifecycle(inv.Context(), codersdk.WorkspaceAgentLifecycleStartError); lifecycleErr != nil {
+						o.Logger(log.LevelError, "Failed to report lifecycle state: %s", lifecycleErr.Error())
+					} else {
+						o.Logger(log.LevelInfo, "Successfully reported start_error to Coder")
+					}
+				}
 			}
 			return err
 		},

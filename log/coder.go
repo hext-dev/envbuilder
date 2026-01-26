@@ -11,6 +11,7 @@ import (
 
 	"cdr.dev/slog"
 	"cdr.dev/slog/sloggers/sloghuman"
+	"cloud.google.com/go/compute/metadata"
 	"github.com/coder/coder/v2/agent/proto"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/agentsdk"
@@ -79,6 +80,104 @@ func Coder(ctx context.Context, coderURL *url.URL, token string) (logger Func, c
 		})
 	}
 	return logger, closer, nil
+}
+
+// CoderClient wraps the connection to Coder and provides lifecycle reporting.
+type CoderClient struct {
+	client *agentsdk.Client
+	logger Func
+	closer func()
+}
+
+// Logger returns the log function for sending logs to Coder.
+func (c *CoderClient) Logger() Func {
+	return c.logger
+}
+
+// Close closes the connection to Coder.
+func (c *CoderClient) Close() {
+	if c.closer != nil {
+		c.closer()
+	}
+}
+
+// ReportLifecycle reports a lifecycle state change to Coder.
+func (c *CoderClient) ReportLifecycle(ctx context.Context, state codersdk.WorkspaceAgentLifecycle) error {
+	return c.client.PostLifecycle(ctx, agentsdk.PostLifecycleRequest{
+		State:     state,
+		ChangedAt: time.Now(),
+	})
+}
+
+// CoderWithGCPAuth establishes a connection to Coder using GCP instance identity
+// authentication. This allows envbuilder to communicate with Coder without requiring
+// a pre-existing agent token - useful when the agent runs inside the container that
+// envbuilder is building.
+func CoderWithGCPAuth(ctx context.Context, coderURL *url.URL, serviceAccount string) (*CoderClient, error) {
+	metaLogger := slog.Make(sloghuman.Sink(os.Stderr))
+	defer metaLogger.Sync()
+
+	// Create a client without a token first
+	client := agentsdk.New(coderURL)
+
+	// Check if we're running on GCP
+	if !metadata.OnGCE() {
+		return nil, fmt.Errorf("not running on GCP, cannot use gcp-instance-identity auth")
+	}
+
+	// Create GCP metadata client
+	gcpClient := metadata.NewClient(nil)
+
+	// Authenticate using GCP instance identity
+	metaLogger.Info(ctx, "Authenticating to Coder using GCP instance identity", slog.F("service_account", serviceAccount))
+	authResp, err := client.AuthGoogleInstanceIdentity(ctx, serviceAccount, gcpClient)
+	if err != nil {
+		return nil, fmt.Errorf("GCP instance identity auth failed: %w", err)
+	}
+
+	// Set the session token we received
+	client.SetSessionToken(authResp.SessionToken)
+	metaLogger.Info(ctx, "Successfully authenticated to Coder via GCP instance identity")
+
+	// Get build info to determine API version
+	bi, err := client.SDK.BuildInfo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get coder build version: %w", err)
+	}
+
+	var logger Func
+	var closer func()
+
+	if semver.Compare(semver.MajorMinor(bi.Version), minAgentAPIV2) < 0 {
+		metaLogger.Warn(ctx, "Detected Coder version incompatible with AgentAPI v2, falling back to deprecated API", slog.F("coder_version", bi.Version))
+		logger, closer = sendLogsV1(ctx, client, metaLogger.Named("send_logs_v1"))
+	} else {
+		// Create a new context so we can ensure the connection is torn down.
+		connCtx, cancel := context.WithCancel(ctx)
+		dac, err := initRPC(connCtx, client, metaLogger.Named("init_rpc"))
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("init coder rpc client: %w", err)
+		}
+		ls := agentsdk.NewLogSender(metaLogger.Named("coder_log_sender"))
+		metaLogger.Info(ctx, "Sending logs via AgentAPI v2", slog.F("coder_version", bi.Version))
+		logger, loggerCloser := sendLogsV2(connCtx, dac, ls, metaLogger.Named("send_logs_v2"))
+
+		var closeOnce sync.Once
+		closer = func() {
+			loggerCloser()
+			closeOnce.Do(func() {
+				cancel()
+				_ = dac.DRPCConn().Close()
+			})
+		}
+	}
+
+	return &CoderClient{
+		client: client,
+		logger: logger,
+		closer: closer,
+	}, nil
 }
 
 type coderLogSender interface {
