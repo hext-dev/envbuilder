@@ -14,15 +14,15 @@ This document tracks custom modifications in the hext-dev/envbuilder fork.
 - **Upstream tags:** `v1.x.x` (from coder/envbuilder)
 - **Hext dev tags:** `hext-dev-v0.x.x` (our custom features)
 
-**Current dev version:** `hext-dev-v0.1.2` (GCP instance identity auth + lifecycle reporting)
+**Current dev version:** `hext-dev-v0.1.3` (GCP instance identity auth + lifecycle reporting + container persistence)
 
 This separation allows easy rollback:
 ```terraform
 # Use stable version
 devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:latest"
 
-# Use dev version with GCP lifecycle reporting
-devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.2"
+# Use dev version with all hext-dev features
+devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.3"
 ```
 
 ## Feature: GCP Instance Identity Auth + Lifecycle Reporting
@@ -57,13 +57,64 @@ devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.2"
 
 ```bash
 # Template uses new image
-devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.2"
+devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.3"
 
 # Pass new env vars
 "ENVBUILDER_CODER_AUTH_METHOD": "gcp-instance-identity",
 "ENVBUILDER_GCP_SERVICE_ACCOUNT": var.service_account_email,
 "CODER_AGENT_URL": data.coder_workspace.me.access_url,
 ```
+
+## Feature: Container Persistence (ENVBUILDER_ENV_FILE)
+
+**Branch:** `hext/gcp-lifecycle-reporting`
+**Version:** `hext-dev-v0.1.3`
+
+**Problem:** By default, Coder workspaces use `docker run --rm`, destroying the container on stop. This loses:
+- Installed packages (`apt install`, `pip install`)
+- Home directory changes (`.claude`, `.ssh`, new dotfiles)
+- System configurations
+
+The old workaround was `persist-home.sh` which symlinked specific dotfiles, but this was fragile and couldn't persist packages or new dotfiles created after initial setup.
+
+**Solution:** Container persistence with fresh environment loading:
+
+1. **Template changes:** Don't use `--rm`, reuse existing containers on restart
+2. **Envbuilder change:** Add `ENVBUILDER_ENV_FILE` to load fresh env vars on restart
+
+When a container restarts, it runs with the original environment variables from creation. But `CODER_AGENT_TOKEN` changes on each workspace start. `ENVBUILDER_ENV_FILE` solves this by reading fresh env vars from a mounted file.
+
+### New Environment Variable
+
+| Variable | Description |
+|----------|-------------|
+| `ENVBUILDER_ENV_FILE` | Path to env file to load at startup. Enables fresh tokens on container restart. |
+
+### How It Works
+
+1. Template writes fresh env vars to `/workspaces/.envbuilder-env` on each VM start
+2. Envbuilder reads this file at startup, overriding stale container env vars
+3. Container state persists, but tokens are always fresh
+
+### Template Integration
+
+```hcl
+# Enable container persistence
+data "coder_parameter" "enable_container_persist" {
+  name    = "enable_container_persist"
+  type    = "bool"
+  default = "true"
+}
+
+# Pass env file path to envbuilder
+envbuilder_env = {
+  "ENVBUILDER_ENV_FILE" : "/workspaces/.envbuilder-env",
+  "ENVBUILDER_SKIP_REBUILD" : "true",
+  ...
+}
+```
+
+See [container-persistence.md](container-persistence.md) for full design details.
 
 ## Syncing with Upstream
 
