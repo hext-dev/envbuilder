@@ -191,6 +191,11 @@ type Options struct {
 	// stored. By default, this is set to `/.envbuilder`. This is intentionally
 	// excluded from the CLI options.
 	WorkingDirBase string
+
+	// EnvFile is the path to an environment file to load at startup.
+	// This allows fresh environment variables on container restart, enabling
+	// container persistence while still getting new tokens/config each start.
+	EnvFile string
 }
 
 const envPrefix = "ENVBUILDER_"
@@ -543,6 +548,15 @@ func (o *Options) CLI() serpent.OptionSet {
 			Env:         WithEnvPrefix("VERBOSE"),
 			Value:       serpent.BoolOf(&o.Verbose),
 			Description: "Enable verbose logging.",
+		},
+		{
+			Flag:  "env-file",
+			Env:   WithEnvPrefix("ENV_FILE"),
+			Value: serpent.StringOf(&o.EnvFile),
+			Description: "Path to an environment file to load at startup. " +
+				"This allows fresh environment variables on container restart, " +
+				"enabling container persistence while still getting new tokens/config each start. " +
+				"The file should contain KEY=VALUE pairs, one per line.",
 		},
 	}
 

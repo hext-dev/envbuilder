@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"net/url"
@@ -21,6 +22,37 @@ import (
 	_ "github.com/breml/rootcerts"
 )
 
+// loadEnvFile reads environment variables from a file and sets them.
+// This enables container persistence by allowing fresh env vars on restart.
+// The file format is KEY=VALUE, one per line. Lines starting with # are ignored.
+func loadEnvFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Split on first = only
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		if key != "" {
+			os.Setenv(key, value)
+		}
+	}
+	return scanner.Err()
+}
+
 func main() {
 	cmd := envbuilderCmd()
 	err := cmd.Invoke().WithOS().Run()
@@ -36,6 +68,27 @@ func envbuilderCmd() serpent.Command {
 		Use:     "envbuilder",
 		Options: o.CLI(),
 		Handler: func(inv *serpent.Invocation) error {
+			// Load fresh environment from file if specified.
+			// This enables container persistence by allowing fresh env vars
+			// (like CODER_AGENT_TOKEN) on container restart.
+			// Must be done early, before other env-dependent initialization.
+			if o.EnvFile != "" {
+				if err := loadEnvFile(o.EnvFile); err != nil {
+					// Log but don't fail - file might not exist on first run
+					fmt.Fprintf(os.Stderr, "Warning: failed to load env file %s: %v\n", o.EnvFile, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "Loaded fresh environment from %s\n", o.EnvFile)
+					// Re-parse options that might have been overridden
+					// For now, just update the ones we know are dynamic
+					if token := os.Getenv("CODER_AGENT_TOKEN"); token != "" {
+						o.CoderAgentToken = token
+					}
+					if url := os.Getenv("CODER_AGENT_URL"); url != "" {
+						o.CoderAgentURL = url
+					}
+				}
+			}
+
 			o.SetDefaults()
 			var preExecs []func()
 			preExec := func() {
