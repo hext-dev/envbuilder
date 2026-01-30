@@ -799,7 +799,26 @@ func run(ctx context.Context, opts options.Options, execArgs *execArgsInfo) erro
 	}
 	execArgs.UserInfo, err = getUser(runtimeData.ContainerUser)
 	if err != nil {
-		return fmt.Errorf("update user: %w", err)
+		// If the user lookup failed (e.g., unexpanded ARG like "$USERNAME"),
+		// try common non-root users, then fall back to root.
+		if strings.HasPrefix(runtimeData.ContainerUser, "$") {
+			opts.Logger(log.LevelWarn, "#%d: user %q looks like an unexpanded Dockerfile ARG, trying fallback users", stageNumber, runtimeData.ContainerUser)
+			fallbackUsers := []string{"node", "vscode", "ubuntu", "coder", ""}
+			for _, fallbackUser := range fallbackUsers {
+				execArgs.UserInfo, err = getUser(fallbackUser)
+				if err == nil {
+					if fallbackUser == "" {
+						opts.Logger(log.LevelWarn, "#%d: falling back to root user", stageNumber)
+					} else {
+						opts.Logger(log.LevelInfo, "#%d: using fallback user %q", stageNumber, fallbackUser)
+					}
+					break
+				}
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("update user: %w", err)
+		}
 	}
 
 	// We only need to do this if we cloned!
@@ -1388,12 +1407,19 @@ func getUser(username string) (userInfo, error) {
 }
 
 // findUser looks up a user by name or ID.
+// If nameOrID looks like an unexpanded ARG (starts with $), it returns an error
+// that can be handled by the caller to fall back to a default user.
 func findUser(nameOrID string) (*user.User, error) {
 	if nameOrID == "" {
 		return &user.User{
 			Uid: "0",
 			Gid: "0",
 		}, nil
+	}
+	// Check for unexpanded Dockerfile ARG variables (e.g., "$USERNAME")
+	// These occur when a Dockerfile has USER $USERNAME but the ARG wasn't defined.
+	if strings.HasPrefix(nameOrID, "$") {
+		return nil, fmt.Errorf("user: unknown user %s (appears to be an unexpanded Dockerfile ARG)", nameOrID)
 	}
 	_, err := strconv.Atoi(nameOrID)
 	if err == nil {
