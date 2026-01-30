@@ -6,15 +6,16 @@ This document tracks custom modifications in the hext-dev/envbuilder fork.
 
 | Branch | Purpose | Image Tag |
 |--------|---------|-----------|
-| `main` | Stable, synced with upstream | `ghcr.io/hext-dev/envbuilder:latest` |
-| `hext/gcp-lifecycle-reporting` | GCP instance identity auth + lifecycle reporting | `ghcr.io/hext-dev/envbuilder:hext-dev-*` |
+| `main` | All hext-dev features (GCP auth, lifecycle reporting, container persistence) | `ghcr.io/hext-dev/envbuilder:hext-dev-*` |
+
+The `main` branch contains all custom hext-dev features. We no longer track upstream on main - sync manually when needed.
 
 ## Tag Namespace
 
 - **Upstream tags:** `v1.x.x` (from coder/envbuilder)
 - **Hext dev tags:** `hext-dev-v0.x.x` (our custom features)
 
-**Current dev version:** `hext-dev-v0.1.3` (GCP instance identity auth + lifecycle reporting + container persistence)
+**Current dev version:** `hext-dev-v0.1.4` (GCP instance identity auth + lifecycle reporting + container persistence + unexpanded ARG handling)
 
 This separation allows easy rollback:
 ```terraform
@@ -22,12 +23,10 @@ This separation allows easy rollback:
 devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:latest"
 
 # Use dev version with all hext-dev features
-devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.3"
+devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.4"
 ```
 
 ## Feature: GCP Instance Identity Auth + Lifecycle Reporting
-
-**Branch:** `hext/gcp-lifecycle-reporting`
 
 **Problem:** When envbuilder fails to build a devcontainer, the Coder workspace hangs forever because:
 1. The Coder agent runs inside the container (never starts if build fails)
@@ -57,7 +56,7 @@ devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.3"
 
 ```bash
 # Template uses new image
-devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.3"
+devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.4"
 
 # Pass new env vars
 "ENVBUILDER_CODER_AUTH_METHOD": "gcp-instance-identity",
@@ -67,8 +66,7 @@ devcontainer_builder_image = "ghcr.io/hext-dev/envbuilder:hext-dev-v0.1.3"
 
 ## Feature: Container Persistence (ENVBUILDER_ENV_FILE)
 
-**Branch:** `hext/gcp-lifecycle-reporting`
-**Version:** `hext-dev-v0.1.3`
+**Version:** `hext-dev-v0.1.3+`
 
 **Problem:** By default, Coder workspaces use `docker run --rm`, destroying the container on stop. This loses:
 - Installed packages (`apt install`, `pip install`)
@@ -120,15 +118,11 @@ See [container-persistence.md](container-persistence.md) for full design details
 
 ```bash
 git fetch upstream
-git checkout main
-git merge upstream/main
+git merge upstream/main  # Merge upstream changes into main
 git push origin main
-
-# Rebase feature branch
-git checkout hext/gcp-lifecycle-reporting
-git rebase main
-git push --force-with-lease origin hext/gcp-lifecycle-reporting
 ```
+
+Note: We no longer maintain a separate feature branch. All development happens on `main`.
 
 ## Critical Gotchas
 
