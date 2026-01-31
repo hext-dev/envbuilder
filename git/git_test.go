@@ -27,6 +27,76 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 )
 
+func TestExtractFragment(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		input            string
+		expectedURL      string
+		expectedFragment string
+	}{
+		{
+			name:             "HTTPS with branch",
+			input:            "https://github.com/user/repo#main",
+			expectedURL:      "https://github.com/user/repo",
+			expectedFragment: "main",
+		},
+		{
+			name:             "HTTPS with refs/heads",
+			input:            "https://github.com/user/repo#refs/heads/feature",
+			expectedURL:      "https://github.com/user/repo",
+			expectedFragment: "refs/heads/feature",
+		},
+		{
+			name:             "HTTPS with commit",
+			input:            "https://github.com/user/repo#a1b2c3d",
+			expectedURL:      "https://github.com/user/repo",
+			expectedFragment: "a1b2c3d",
+		},
+		{
+			name:             "HTTPS no fragment",
+			input:            "https://github.com/user/repo",
+			expectedURL:      "https://github.com/user/repo",
+			expectedFragment: "",
+		},
+		{
+			name:             "SCP-style with branch",
+			input:            "git@github.com:user/repo.git#main",
+			expectedURL:      "git@github.com:user/repo.git",
+			expectedFragment: "main",
+		},
+		{
+			name:             "SCP-style with refs/heads",
+			input:            "git@github.com:user/repo.git#refs/heads/feature",
+			expectedURL:      "git@github.com:user/repo.git",
+			expectedFragment: "refs/heads/feature",
+		},
+		{
+			name:             "SCP-style no fragment",
+			input:            "git@github.com:user/repo.git",
+			expectedURL:      "git@github.com:user/repo.git",
+			expectedFragment: "",
+		},
+		{
+			name:             "SSH URL with branch",
+			input:            "ssh://git@github.com/user/repo.git#main",
+			expectedURL:      "ssh://git@github.com/user/repo.git",
+			expectedFragment: "main",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			url, fragment := git.ExtractFragment(tc.input)
+			require.Equal(t, tc.expectedURL, url)
+			require.Equal(t, tc.expectedFragment, fragment)
+		})
+	}
+}
+
 func TestCloneRepo(t *testing.T) {
 	t.Parallel()
 

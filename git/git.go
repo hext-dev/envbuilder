@@ -43,13 +43,30 @@ type CloneRepoOptions struct {
 	ProxyOptions transport.ProxyOptions
 }
 
+// ExtractFragment extracts a #fragment from a URL string before parsing.
+// This is needed because giturls.Parse doesn't handle fragments in SCP-style
+// URLs (e.g., git@github.com:user/repo.git#branch).
+func ExtractFragment(rawURL string) (urlWithoutFragment, fragment string) {
+	// Only split on # if it appears after the host/path portion.
+	// For SCP-style URLs (git@host:path), # is never part of the valid URL.
+	// For standard URLs, # marks the fragment.
+	if idx := strings.LastIndex(rawURL, "#"); idx != -1 {
+		return rawURL[:idx], rawURL[idx+1:]
+	}
+	return rawURL, ""
+}
+
 // CloneRepo will clone the repository at the given URL into the given path.
 // If a repository is already initialized at the given path, it will not
 // be cloned again.
 //
 // The bool returned states whether the repository was cloned or not.
 func CloneRepo(ctx context.Context, logf func(string, ...any), opts CloneRepoOptions) (bool, error) {
-	parsed, err := giturls.Parse(opts.RepoURL)
+	// Extract fragment before parsing, as giturls.Parse doesn't handle
+	// fragments in SCP-style URLs (git@github.com:user/repo.git#branch).
+	repoURL, manualFragment := ExtractFragment(opts.RepoURL)
+
+	parsed, err := giturls.Parse(repoURL)
 	if err != nil {
 		return false, fmt.Errorf("parse url %q: %w", opts.RepoURL, err)
 	}
@@ -92,7 +109,11 @@ func CloneRepo(ctx context.Context, logf func(string, ...any), opts CloneRepoOpt
 	if err != nil {
 		return false, fmt.Errorf("mkdir %q: %w", opts.Path, err)
 	}
-	reference := parsed.Fragment
+	// Use manually extracted fragment (for SCP-style URLs) or parsed fragment
+	reference := manualFragment
+	if reference == "" {
+		reference = parsed.Fragment
+	}
 	if reference == "" && opts.SingleBranch {
 		// When SingleBranch is true and no branch is specified, don't set a
 		// default. go-git will automatically detect and use the remote's HEAD
